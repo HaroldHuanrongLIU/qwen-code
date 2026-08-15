@@ -90,6 +90,7 @@ import {
   recordResume,
   recordRestart,
   RESUME_MAX,
+  resumeBookkeepingRefused,
 } from './lib/run-ledger.js';
 import {
   assessResume,
@@ -1096,6 +1097,22 @@ function tryResume(args: FetchPrArgs, wt: string): ResumeOutcome {
           deletions: liveDiffStat.deletions,
         })
       : null;
+  // A cap that cannot READ its bookkeeping cannot enforce itself: with the
+  // record tree redirected (a symlinked `<plan>-prompts`), both counters read
+  // zero through the refusal, `max(0, 0)` never reaches RESUME_MAX, and the
+  // clobber guard skips every marker write — the review resumes forever,
+  // each attempt announcing "resume 1". Refuse outright and fall through to
+  // the fresh path: the cap fails CLOSED.
+  if (resumeBookkeepingRefused(out)) {
+    return {
+      resumed: false,
+      reason: 'bookkeeping-unreadable',
+      priorFetchedSha:
+        prev !== null && typeof prev.fetchedSha === 'string'
+          ? prev.fetchedSha
+          : null,
+    };
+  }
   const marker = readResumeMarker(out);
   // The cap reads BOTH counters: the marker is the primary record, and the
   // session ledger cross-caps it — a deleted marker must not read as an
